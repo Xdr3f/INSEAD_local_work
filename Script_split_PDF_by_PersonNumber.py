@@ -3,6 +3,11 @@ This script allows the user to select one or more PDF files and a destination fo
 It then processes each PDF, searching for "Person Number" entries using a regular expression. 
 The script is designed to split or organize the PDFs based on these person numbers, 
 saving the resulting files with sanitized filenames in the chosen folder.
+
+Note : The current version is not made for a specific infratructure and will need more context to be truly efficient.
+Important : The script assumes that the "Person Number" is formatted as "Person Number: XXXXX" or 
+            "Person Number XXXXX" in the PDF text. It also assumes that the page containing the Person Number is the one to be saved.
+            Modifications will have to be made depending in the PDF's layout.
 """
 
 import re
@@ -12,6 +17,7 @@ from tkinter.filedialog import askopenfilenames, askdirectory
 import os
 import string
 
+#Prevents the use of invalid characters in filenames (specially for windows)
 def sanitize_filename(name):
     valid_chars = f"-_.() {string.ascii_letters}{string.digits}"
     return "".join(c for c in name if c in valid_chars)
@@ -25,14 +31,14 @@ def main():
         print("No files selected. Exiting.")
         return
 
-    # Select folder
+    # Select the destination folder
     save_folder = askdirectory(title="Select folder to save PDFs")
     if not save_folder:
         print("No folder selected. Exiting.")
         return
     os.makedirs(save_folder, exist_ok=True)
 
-    # Regex pattern
+    # Regex pattern to locate the Person Number
     pattern = re.compile(r"Person Number[:\s]+(\d+)")
     all_saved_files = []
 
@@ -41,6 +47,7 @@ def main():
         reader = PdfReader(input_pdf)
         saved_files = []
 
+        # Process each page in the PDF
         for i, page in enumerate(reader.pages):
             text = page.extract_text() or ""
             match = pattern.search(text)
