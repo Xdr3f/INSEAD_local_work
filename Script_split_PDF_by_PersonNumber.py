@@ -3,7 +3,9 @@
 # --The script is designed to split or organize the PDFs based on these person numbers, 
 # --saving the resulting files with sanitized filenames in the chosen folder.
 #
-# --Note : The current version is not made for a specific infratructure and will need more context to be truly efficient.
+# --Note : If an error occurs with a syntax error, try running the script in a terminal instead of an IDE. If on VSCode,
+#         you can run it in the "dedicated terminal".
+#
 # --Important : The script assumes that the "Person Number" is formatted as "Person Number: XXXXX" or 
 #             "Person Number XXXXX" in the PDF text. 
 #              It also assumes that the page containing the Person Number is the one to be saved.
@@ -16,7 +18,7 @@ from tkinter.filedialog import askopenfilenames, askdirectory
 import os
 import string
 
-#Prevents the use of invalid characters in filenames (specially for windows)
+# Prevents the use of invalid characters in filenames (specially for windows)
 def sanitize_filename(name):
     valid_chars = f"-_.() {string.ascii_letters}{string.digits}"
     return "".join(c for c in name if c in valid_chars)
