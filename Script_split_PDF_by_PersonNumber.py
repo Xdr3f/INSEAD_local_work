@@ -6,7 +6,8 @@ saving the resulting files with sanitized filenames in the chosen folder.
 
 Note : The current version is not made for a specific infratructure and will need more context to be truly efficient.
 Important : The script assumes that the "Person Number" is formatted as "Person Number: XXXXX" or 
-            "Person Number XXXXX" in the PDF text. It also assumes that the page containing the Person Number is the one to be saved.
+            "Person Number XXXXX" in the PDF text. 
+            It also assumes that the page containing the Person Number is the one to be saved.
             Modifications will have to be made depending in the PDF's layout.
 """
 
