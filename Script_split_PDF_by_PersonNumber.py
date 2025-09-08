@@ -1,16 +1,17 @@
-# --This script allows the user to select one or more PDF files and a destination folder. 
-# --It then processes each PDF, searching for "Person Number" entries using a regular expression. 
-# --The script is designed to split or organize the PDFs based on these person numbers, 
-# --saving the resulting files with sanitized filenames in the chosen folder.
-#
-# --Note : If an error occurs with a syntax error, try running the script in a terminal instead of an IDE. If on VSCode,
-#         you can run it in the "dedicated terminal".
-#
-# --Important : The script assumes that the "Person Number" is formatted as "Person Number: XXXXX" or 
-#             "Person Number XXXXX" in the PDF text. 
-#              It also assumes that the page containing the Person Number is the one to be saved.
-#              Modifications will have to be made depending in the PDF's layout.
+""" 
+--This script allows the user to select one or more PDF files and a destination folder. 
+--It then processes each PDF, searching for "Person Number" entries using a regular expression. 
+--The script is designed to split or organize the PDFs based on these person numbers,
+  saving the resulting files with sanitized filenames in the chosen folder.
 
+--Note : If an error occurs with a syntax error, try running the script in a terminal instead of an IDE. If on VSCode,
+  you can run it in the "dedicated terminal".
+  
+--Important : The script assumes that the "Person Number" is formatted as "Person Number: XXXXX" or 
+    Person Number XXXXX" in the PDF text. 
+    It also assumes that the page containing the Person Number is the one to be saved.
+    Modifications will have to be made depending in the PDF's layout.
+"""
 import re
 from PyPDF2 import PdfReader, PdfWriter
 from tkinter import Tk
