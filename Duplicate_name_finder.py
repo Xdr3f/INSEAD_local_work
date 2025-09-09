@@ -1,6 +1,7 @@
 import pdfplumber
 import os
 import re
+import unicodedata
 import tkinter as tk
 from tkinter import filedialog
 from reportlab.lib.pagesizes import A4
@@ -21,33 +22,44 @@ def normalize_text(text):
     """
     Normalize text for comparison:
     - Lowercase
-    - Replace underscores/dashes with spaces
-    - Remove digits and special characters except letters and spaces
+    - Normalize accents (é -> e, ñ -> n, etc.)
+    - Keep only letters and spaces
     - Collapse multiple spaces
     """
     text = text.lower()
-    text = re.sub(r'[_\-]', ' ', text)       # Replace underscores/dashes with space
-    text = re.sub(r'[^a-z\s]', '', text)     # Keep only letters and spaces
-    text = re.sub(r'\s+', ' ', text).strip() # Collapse multiple spaces
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(c for c in text if c.isalpha() or c.isspace())
+    text = re.sub(r"\s+", " ", text).strip()
     return text
+
+# ===== Extract First & Last Name from Filename =====
+def extract_name_from_filename(filename):
+    """
+    Expected format: {date}_{role}_{firstName}_{lastName}_{ID}
+    Returns (firstName, lastName) or (None, None) if not matched
+    """
+    base_name = os.path.splitext(os.path.basename(filename))[0]
+    parts = base_name.split("_")
+    if len(parts) >= 4:
+        first_name = parts[2]
+        last_name = parts[3]
+        return first_name, last_name
+    return None, None
 
 # ===== Check Match =====
 def check_name_in_pdf(pdf_path):
     pdf_text = extract_text_from_pdf(pdf_path)
     normalized_pdf = normalize_text(pdf_text)
 
-    # Extract name part from filename by removing leading/trailing digits and special chars
-    base_name = os.path.splitext(os.path.basename(pdf_path))[0]
-    # Remove date/job/random numbers at start/end
-    name_part = re.sub(r'^\d+_', '', base_name)   # Remove leading digits (date)
-    name_part = re.sub(r'_\d+$', '', name_part)   # Remove trailing numbers
-    # Remove extra symbols
-    name_part = re.sub(r'^[^a-zA-Z]+|[^a-zA-Z]+$', '', name_part)
+    first_name, last_name = extract_name_from_filename(pdf_path)
+    if not first_name or not last_name:
+        return False  # Can't extract name properly
 
-    normalized_name = normalize_text(name_part)
+    first_name = normalize_text(first_name)
+    last_name = normalize_text(last_name)
 
-    # Check if normalized name appears in normalized PDF
-    return normalized_name in normalized_pdf
+    # Check if both names are present somewhere in the PDF
+    return (first_name in normalized_pdf and last_name in normalized_pdf)
 
 # ===== Scan Folder =====
 def scan_folder(folder_path):
@@ -66,7 +78,7 @@ def generate_pdf_report(files_list, save_path):
     c.setFont("Helvetica-Bold", 14)
     c.drawString(50, height - 50, "PDF Filename Match Report")
     c.setFont("Helvetica", 12)
-    
+
     y = height - 80
     if not files_list:
         c.drawString(50, y, "All PDF filenames match the content. No mismatches found.")
