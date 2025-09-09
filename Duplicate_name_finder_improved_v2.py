@@ -83,30 +83,67 @@ def extract_name_tokens(filename: str) -> List[str]:
             
     return tokens
 
-def find_exact_word_match(word: str, text: str) -> Tuple[bool, str]:
+def find_exact_word_match(word: str, text: str) -> Tuple[bool, str, List[str]]:
     """Find exact word match ensuring the entire word/phrase matches exactly.
+    Also finds all possible name variations in the surrounding context.
     
     Args:
         word: The word/phrase to search for
         text: The text to search in
     
     Returns:
-        Tuple of (found, matched_text)
-        Only returns True if the entire word/phrase matches exactly
+        Tuple of (found, matched_text, all_possible_matches)
+        Only returns True if the entire word/phrase matches exactly AND
+        there are no longer variations of the name in context
     """
-    # Create pattern that matches the exact word/phrase
-    pattern = r'\b' + re.escape(word) + r'\b'
-    matches = list(re.finditer(pattern, text))
+    # Normalize both word and text
+    norm_word = normalize_text(word)
+    norm_text = normalize_text(text)
+    
+    # Create pattern that matches the exact word/phrase with word boundaries
+    pattern = r'\b' + re.escape(norm_word) + r'\b'
+    matches = list(re.finditer(pattern, norm_text, re.IGNORECASE))
     
     if matches:
+        all_context_matches = set()
+        
         for match in matches:
-            # Extract the exact matched text
-            matched_text = match.group()
-            # Only return true if the matched text is exactly equal to our search word
-            if matched_text == word:
-                return True, matched_text
+            # Get context around the match (50 chars before and after)
+            start = max(0, match.start() - 50)
+            end = min(len(norm_text), match.end() + 50)
+            context = norm_text[start:end]
+            
+            # Find all possible word combinations in context that could be names
+            # This helps detect if our match is part of a longer name
+            context_pattern = r'\b[A-Za-z]+(?:\s+[A-Za-z]+){0,3}\b'
+            
+            for m in re.finditer(context_pattern, context, re.IGNORECASE):
+                context_text = m.group().strip()
+                if context_text:  # Ignore empty matches
+                    # Get original text for this match from the un-normalized text
+                    orig_start = start + m.start()
+                    orig_end = start + m.end()
+                    original_text = text[orig_start:orig_end].strip()
+                    all_context_matches.add(original_text)
+            
+            # Get original text for the exact match
+            match_start = match.start()
+            match_end = match.end()
+            matched_original = text[match_start:match_end].strip()
+            
+            # Only return true if:
+            # 1. The normalized matched text exactly equals our search word
+            # 2. It's not part of a longer name
+            is_part_of_longer_name = any(
+                (normalize_text(matched_original) != normalize_text(other_text) and 
+                 normalize_text(matched_original) in normalize_text(other_text))
+                for other_text in all_context_matches
+            )
+            
+            if normalize_text(matched_original) == normalize_text(word) and not is_part_of_longer_name:
+                return True, matched_original, list(all_context_matches)
     
-    return False, ""
+    return False, "", []
 
 def check_name_in_pdf(pdf_path: str) -> Dict:
     pdf_text, error = extract_text_from_pdf(pdf_path)
@@ -130,10 +167,21 @@ def check_name_in_pdf(pdf_path: str) -> Dict:
         no_acc, with_acc = tokens[0]
         for text in [pdf_no_accents, pdf_with_accents]:
             for name in [no_acc, with_acc]:
-                found, full_match = find_exact_word_match(name, text)
+                found, full_match, context_matches = find_exact_word_match(name, text)
                 if found:
-                    # For perfect match, require exact equality
-                    if normalize_text(full_match) == normalize_text(name):
+                    # For perfect match, require:
+                    # 1. Exact equality after normalization
+                    # 2. No other variations of the name exist in context
+                    norm_name = normalize_text(name)
+                    
+                    # Check all possible matches in context to ensure no variations exist
+                    has_variations = any(
+                        normalize_text(other_match) != norm_name 
+                        and norm_name in normalize_text(other_match)
+                        for other_match in context_matches
+                    )
+                    
+                    if not has_variations and normalize_text(full_match) == norm_name:
                         perfect_match_found = True
                         best_score = 100
                         best_pair = (name, "")
