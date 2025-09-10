@@ -22,6 +22,9 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 import datetime
 
+import sys
+import traceback
+
 # Set up logging
 logging.basicConfig(level=logging.INFO,
                    format='%(asctime)s - %(levelname)s - %(message)s')
@@ -453,5 +456,26 @@ class PDFScannerGUI:
         doc.build(elements)
 
 if __name__ == "__main__":
-    app = PDFScannerGUI()
-    app.root.mainloop()
+    try:
+        app = PDFScannerGUI()
+        app.root.mainloop()
+    except Exception as e:
+        # Gather full traceback
+        tb_str = "".join(traceback.format_exception(type(e), e, e.__traceback__))
+        logging.error(f"Unhandled exception:\n{tb_str}")
+        
+        # Show error to user
+        try:
+            root = tk.Tk()
+            root.withdraw()  # Hide main window
+            messagebox.showerror(
+                "Critical Error",
+                f"An unexpected error occurred:\n\n{str(e)}\n\n"
+                "The application will now close."
+            )
+            root.destroy()
+        except:
+            # If Tkinter itself fails, fallback to console output
+            print(f"Critical Error: {e}", file=sys.stderr)
+        
+        sys.exit(1)  # Exit with error code
