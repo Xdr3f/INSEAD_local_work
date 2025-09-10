@@ -1,15 +1,15 @@
 import os
 import hashlib
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
-
 import fitz  # PyMuPDF
 from PIL import Image
 import imagehash
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Image as RLImage, Spacer, PageBreak
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet
 
-
+# ===== PDF Hashing =====
 def hash_pdf_file(filepath):
-    """Compute a hash of the PDF file's binary content."""
     hasher = hashlib.sha256()
     with open(filepath, 'rb') as f:
         while True:
@@ -19,14 +19,12 @@ def hash_pdf_file(filepath):
             hasher.update(chunk)
     return hasher.hexdigest()
 
-
 def perceptual_hash_pdf(filepath):
-    """Compute a perceptual hash based on the first page of a PDF."""
+    """Compute a perceptual hash from the first page of a PDF."""
     try:
         doc = fitz.open(filepath)
         if len(doc) == 0:
             return None
-
         page = doc[0]
         pix = page.get_pixmap(dpi=100)
         img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
@@ -36,12 +34,12 @@ def perceptual_hash_pdf(filepath):
         print(f"Error hashing {filepath}: {e}")
         return None
 
-
+# ===== Find Duplicates =====
 def find_duplicate_pdfs(folder_path, threshold=5):
-    """Find visually duplicate PDF files (perceptual hash)"""
     pdf_files = [f for f in os.listdir(folder_path) if f.lower().endswith('.pdf')]
     hashes = {}
-    duplicates = []
+    exact_duplicates = []
+    near_duplicates = []
 
     for file in pdf_files:
         full_path = os.path.join(folder_path, file)
@@ -49,67 +47,92 @@ def find_duplicate_pdfs(folder_path, threshold=5):
         if not file_hash:
             continue
 
-        found = False
+        found_exact = False
         for h, orig in hashes.items():
-            distance = file_hash - h  # Hamming distance
-            if distance <= threshold:
-                duplicates.append((file, orig))
-                found = True
+            distance = file_hash - h
+            if distance == 0:
+                exact_duplicates.append((file, orig, distance))
+                found_exact = True
                 break
-
-        if not found:
+            elif distance <= threshold:
+                near_duplicates.append((file, orig, distance))
+                found_exact = True
+                break
+        if not found_exact:
             hashes[file_hash] = file
+    return exact_duplicates, near_duplicates
 
-    return duplicates
+# ===== PDF Report Generation =====
+def generate_pdf_report(folder_path, exact_duplicates, near_duplicates, save_path, thumbnail=True):
+    doc = SimpleDocTemplate(save_path, pagesize=A4)
+    elements = []
+    styles = getSampleStyleSheet()
+    elements.append(Paragraph("Duplicate PDF Files Report", styles['Title']))
+    elements.append(Spacer(1, 12))
+    elements.append(Paragraph(f"Folder scanned: {folder_path}", styles['Normal']))
+    elements.append(Paragraph(f"Total exact duplicates: {len(exact_duplicates)}", styles['Normal']))
+    elements.append(Paragraph(f"Total near-duplicates (threshold applied): {len(near_duplicates)}", styles['Normal']))
+    elements.append(Spacer(1, 24))
 
+    def add_table_section(title, data_list):
+        if not data_list:
+            elements.append(Paragraph(f"No {title.lower()} found.", styles['Normal']))
+            return
+        elements.append(Paragraph(title, styles['Heading2']))
+        elements.append(Spacer(1, 12))
+        table_data = [["Duplicate", "Original", "Distance", "Thumbnail"]]
+        for dup, orig, dist in data_list:
+            row = [dup, orig, str(dist)]
+            if thumbnail:
+                try:
+                    img_path = os.path.join(folder_path, dup)
+                    doc_pdf = fitz.open(img_path)
+                    page = doc_pdf[0]
+                    pix = page.get_pixmap(dpi=50)
+                    img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                    thumb_path = os.path.join(folder_path, f"thumb_{dup}.png")
+                    img.thumbnail((80, 100))
+                    img.save(thumb_path)
+                    row.append(RLImage(thumb_path))
+                except:
+                    row.append("")
+            else:
+                row.append("")
+            table_data.append(row)
+        table = Table(table_data, colWidths=[150, 150, 60, 100])
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.grey),
+            ('TEXTCOLOR',(0,0),(-1,0),colors.whitesmoke),
+            ('ALIGN',(0,0),(-1,-1),'CENTER'),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('BOTTOMPADDING', (0,0), (-1,0), 8),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+            ('BACKGROUND',(0,1),(-1,-1),colors.beige),
+        ]))
+        elements.append(table)
+        elements.append(PageBreak())
 
-def generate_pdf_report(duplicates, save_path):
-    c = canvas.Canvas(save_path, pagesize=A4)
-    width, height = A4
-    margin_x = 50
-    y = height - 50
+    add_table_section("Exact Duplicates", exact_duplicates)
+    add_table_section("Near-Duplicates", near_duplicates)
 
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(margin_x, y, "Duplicate PDF Files Report")
-    y -= 30
+    doc.build(elements)
 
-    c.setFont("Helvetica-Bold", 12)
-    summary = f"Total duplicates found: {len(duplicates)}"
-    c.drawString(margin_x, y, summary)
-    y -= 20
-
-    c.setFont("Helvetica", 10)
-    if not duplicates:
-        c.drawString(margin_x, y, "No duplicate files found.")
-    else:
-        for dup, orig in duplicates:
-            line = f"Duplicate: {dup}  |  Matches: {orig}"
-            c.drawString(margin_x, y, line)
-            y -= 12
-            if y < 60:
-                c.showPage()
-                y = height - 50
-    c.save()
-
-
+# ===== Main Execution =====
 if __name__ == "__main__":
     import tkinter as tk
     from tkinter import filedialog
 
     root = tk.Tk()
-    root.withdraw()  # hide the main window
+    root.withdraw()
 
-    # Select folder with PDFs
     folder_path = filedialog.askdirectory(title="Select folder containing PDFs")
     if not folder_path:
         print("No folder selected. Exiting.")
         exit()
 
     print("Scanning PDFs for duplicates...")
+    exact_duplicates, near_duplicates = find_duplicate_pdfs(folder_path, threshold=5)
 
-    duplicates = find_duplicate_pdfs(folder_path)
-
-    # Select where to save the report
     save_path = filedialog.asksaveasfilename(
         defaultextension=".pdf",
         filetypes=[("PDF files", "*.pdf")],
@@ -119,5 +142,5 @@ if __name__ == "__main__":
         print("No save path selected. Exiting.")
         exit()
 
-    generate_pdf_report(duplicates, save_path)
+    generate_pdf_report(folder_path, exact_duplicates, near_duplicates, save_path)
     print(f"Report generated: {save_path}")
