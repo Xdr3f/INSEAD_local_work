@@ -116,10 +116,9 @@ def get_best_ngram_match(name, chunk, ngram_range=(2, 5)):
 def check_name_in_pdf(pdf_path: str) -> Dict:
     pdf_text, error = extract_text_from_pdf(pdf_path)
     if error:
-        print(f"[ERROR] PDF extraction failed: {error}")
         return {"best_pair": None, "best_score": 0, "error": error}
 
-    print(f"PDF Text (first 100 chars): {pdf_text[:100]}")
+    # ...removed debug print...
 
     # Normalize text
     pdf_no_accents = normalize_text(pdf_text, preserve_accents=False)
@@ -130,11 +129,11 @@ def check_name_in_pdf(pdf_path: str) -> Dict:
     pdf_with_accents_norm = re.sub(r'\s+', ' ', pdf_with_accents)
 
     tokens = extract_name_tokens(pdf_path)
-    print(f"Extracted tokens from filename: {tokens}")
+    # ...removed debug print...
 
     # Keep only alphabetic tokens for names
     alpha_tokens = [(no_acc, with_acc) for no_acc, with_acc in tokens if no_acc.isalpha()]
-    print(f"Alphabetic tokens only: {alpha_tokens}")
+    # ...removed debug print...
 
     if not alpha_tokens:
         return {"best_pair": None, "best_score": 0, "error": "No valid alphabetic name tokens found"}
@@ -147,11 +146,11 @@ def check_name_in_pdf(pdf_path: str) -> Dict:
     # Case 1: Single-token names
     if len(alpha_tokens) == 1:
         no_acc, with_acc = alpha_tokens[0]
-        print(f"Checking single token: {no_acc}")
+    # ...removed debug print...
         for text in [pdf_no_accents_norm, pdf_with_accents_norm]:
             for name in [no_acc, with_acc]:
                 found, full_match, context_matches = find_exact_word_match(name, text)
-                print(f"  Found: {found}, Full match: '{full_match}', Context matches: {context_matches}")
+                # ...removed debug print...
                 if found and is_bidirectional_match(full_match, name):
                     perfect_match_found = True
                     best_score = 100
@@ -190,15 +189,15 @@ def check_name_in_pdf(pdf_path: str) -> Dict:
                 for no_acc_combined, with_acc_combined in combinations:
                     for text in [pdf_no_accents_norm, pdf_with_accents_norm]:
                         for name in [no_acc_combined, with_acc_combined]:
-                            print(f"Checking combination: {name}")
+                            # ...removed debug print...
                             found, full_match, _ = find_exact_word_match(name, text)
-                            print(f"  Found: {found}, Full match: '{full_match}'")
+                            # ...removed debug print...
                             if found and is_bidirectional_match(full_match, name):
                                 perfect_match_found = True
                                 best_score = 100
                                 best_pair = (first_with_acc, last_with_acc)
                                 best_matched_text = full_match
-                                print(f"  Perfect match found: {best_pair}, text: '{best_matched_text}'")
+                                # ...removed debug print...
                                 break
 
                             # Fuzzy similarity → partial match only
@@ -212,7 +211,7 @@ def check_name_in_pdf(pdf_path: str) -> Dict:
                                     best_pair = (first_with_acc, last_with_acc)
                                     # Use RapidFuzz to find the closest substring in the chunk
                                     best_matched_text = get_best_ngram_match(name, chunk)
-                                    print(f"  Partial match candidate: {name} -> score {score}, PDF match: '{best_matched_text}'")
+                                    # ...removed debug print...
 
                         if perfect_match_found:
                             break
@@ -223,7 +222,7 @@ def check_name_in_pdf(pdf_path: str) -> Dict:
             if perfect_match_found:
                 break
 
-    print(f"Best pair: {best_pair}, Score: {best_score}, Matched text: '{best_matched_text}'\n")
+    # ...removed debug print...
     return {
         "best_pair": best_pair,
         "best_score": best_score,
