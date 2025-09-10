@@ -16,6 +16,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Tuple, Optional
 from functools import partial
 import threading
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+import datetime
 
 # Set up logging
 logging.basicConfig(level=logging.INFO,
@@ -325,11 +330,14 @@ class PDFScannerGUI:
                     progress=completed
                 )
 
+        # Default report filename with date
+        default_name = f"PDF_Name_Duplicate_Report_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.pdf"
         save_path = filedialog.asksaveasfilename(
-            defaultextension=".pdf",
-            filetypes=[("PDF files", "*.pdf")],
-            title="Save PDF report as..."
-        )
+        initialfile=default_name,
+        defaultextension=".pdf",
+        filetypes=[("PDF files", "*.pdf")],
+        title="Save PDF report as..."
+)
         
         if save_path:
             self.generate_enhanced_pdf_report(results, save_path)
@@ -341,88 +349,108 @@ class PDFScannerGUI:
             self.root.after(1500, self.root.destroy)
 
     def generate_enhanced_pdf_report(self, results: Dict, save_path: str):
-        c = canvas.Canvas(save_path, pagesize=A4)
-        width, height = A4
-        margin_x = 50
-        y = height - 50
+        doc = SimpleDocTemplate(save_path, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+        elements = []
+        
+        # --- Styles ---
+        styles = getSampleStyleSheet()
+        style_title = ParagraphStyle('Title', parent=styles['Heading1'], fontSize=20, leading=24)
+        style_h2 = ParagraphStyle('Heading2', parent=styles['Heading2'], fontSize=16, leading=20)
+        style_normal = ParagraphStyle('Normal', parent=styles['Normal'], fontSize=12, leading=16)
 
-        c.setFont("Helvetica-Bold", 16)
-        c.drawString(margin_x, y, "PDF Filename Match Report")
-        y -= 30
+        # --- Title ---
+        elements.append(Paragraph("PDF Filename Match Report", style_title))
+        elements.append(Spacer(1, 12))
 
-        c.setFont("Helvetica-Bold", 12)
+        # --- Summary ---
         total_processed = sum(len(x) for x in results.values())
         total_issues = len(results['no_match']) + len(results['partial_match']) + len(results['errors'])
-        
         summary_text = (
-            f"Total files processed: {total_processed}\n"
-            f"Perfect matches: {len(results['perfect_match'])}\n"
-            f"Total files with issues: {total_issues}\n"
-            f"  - No matches: {len(results['no_match'])}\n"
-            f"  - Partial matches: {len(results['partial_match'])}\n"
-            f"  - Errors: {len(results['errors'])}"
+            f"Total files processed: {total_processed}<br/>"
+            f"Perfect matches: {len(results['perfect_match'])}<br/>"
+            f"Total files with issues: {total_issues}<br/>"
+            f"&nbsp;&nbsp;- No matches: {len(results['no_match'])}<br/>"
+            f"&nbsp;&nbsp;- Partial matches: {len(results['partial_match'])}<br/>"
+            f"&nbsp;&nbsp;- Errors: {len(results['errors'])}"
         )
-        for line in summary_text.split('\n'):
-            c.drawString(margin_x, y, line)
-            y -= 20
+        elements.append(Paragraph(summary_text, style_normal))
+        elements.append(Spacer(1, 12))
 
-        sections = [
-            ("Errors", results["errors"]),
-            ("No Match", results["no_match"]),
-            ("Partial Match", results["partial_match"])
-        ]
-
-        for title, items in sections:
-            if y < 100:
-                c.showPage()
-                y = height - 50
-
-            y -= 20
-            c.setFont("Helvetica-Bold", 12)
-            c.drawString(margin_x, y, f"{title} ({len(items)})")
-            y -= 15
+        # --- Function to create table sections ---
+        def create_section(title, items):
+            elements.append(PageBreak())
+            elements.append(Paragraph(f"{title} ({len(items)})", style_h2))
+            elements.append(Spacer(1, 6))
 
             if not items:
-                c.setFont("Helvetica", 10)
-                c.drawString(margin_x + 10, y, "None")
-                y -= 15
-                continue
+                elements.append(Paragraph("None", style_normal))
+                elements.append(Spacer(1, 12))
+                return
 
-            c.setFont("Helvetica", 10)
-            for item in items:
-                if isinstance(item, tuple):
-                    if len(item) == 2:  # error
-                        file, error = item
-                        text = f"- {file}: {error}"
-                    elif len(item) == 4:  # normal match info
-                        file, pair, score, matched_text = item
-                        pair_text = " ".join(p for p in pair if p) if pair else "N/A"
-                        text = f"- {file} — {pair_text} — {score:.0f}% — Best filename: '{pair_text}' — Closest PDF: '{matched_text}'"
-                    else:
-                        # Catch-all safety
-                        text = f"- Unexpected result format: {item}"
-                else:
-                    text = f"- Invalid entry: {item}"
+            data = []
+            if title == "Errors":
+                data.append([Paragraph("Filename", style_normal), Paragraph("Error", style_normal)])
+                for file, error in items:
+                    data.append([Paragraph(file, style_normal), Paragraph(error, style_normal)])
+            else:
+                data.append([
+                    Paragraph("Filename", style_normal),
+                    Paragraph("Name Detected", style_normal),
+                    Paragraph("Score (%)", style_normal),
+                    Paragraph("Best Filename", style_normal),
+                    Paragraph("Closest Text", style_normal)
+                ])
+                for item in items:
+                    file, pair, score, matched_text = item
+                    pair_text = " ".join(p for p in pair if p) if pair else "N/A"
+                    matched_text_display = matched_text if len(matched_text) <= 500 else matched_text[:497] + "..."
+                    data.append([
+                        Paragraph(file, style_normal),
+                        Paragraph(pair_text, style_normal),
+                        Paragraph(f"{score:.0f}", style_normal),
+                        Paragraph(pair_text, style_normal),
+                        Paragraph(matched_text_display, style_normal)
+                    ])
 
+            # --- Flexible column widths ---
+            colWidths = [120, 100, 40, 120, 180] if title != "Errors" else [200, 320]
 
-                words = text.split()
-                line = ""
-                for word in words:
-                    test_line = line + " " + word if line else word
-                    if c.stringWidth(test_line, "Helvetica", 10) < width - 2*margin_x:
-                        line = test_line
-                    else:
-                        c.drawString(margin_x + 10, y, line)
-                        y -= 12
-                        line = word
-                    if y < 60:
-                        c.showPage()
-                        y = height - 50
-                if line:
-                    c.drawString(margin_x + 10, y, line)
-                    y -= 12
+            # --- Create Table with repeating header ---
+            table = Table(data, colWidths=colWidths, repeatRows=1)
+            tbl_style = TableStyle([
+                ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+                ('FONT', (0,0), (-1,0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0,0), (-1,0), 14),    # header font size
+                ('FONTSIZE', (0,1), (-1,-1), 12),   # body font size
+                ('BACKGROUND', (0,0), (-1,0), colors.grey),
+                ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+            ])
 
-        c.save()
+            # Color-code rows for non-error tables
+            if title != "Errors":
+                for i, row in enumerate(data[1:], start=1):
+                    try:
+                        score = int(row[2].text)  # extract text from Paragraph
+                        if score >= 100:
+                            tbl_style.add('TEXTCOLOR', (0,i), (-1,i), colors.green)
+                        elif score >= 30:
+                            tbl_style.add('TEXTCOLOR', (0,i), (-1,i), colors.orange)
+                        else:
+                            tbl_style.add('TEXTCOLOR', (0,i), (-1,i), colors.red)
+                    except:
+                        pass
+
+            table.setStyle(tbl_style)
+            elements.append(table)
+            elements.append(Spacer(1, 12))
+
+        # --- Build all sections ---
+        create_section("Errors", results["errors"])
+        create_section("No Match", results["no_match"])
+        create_section("Partial Match", results["partial_match"])
+
+        # --- Build PDF ---
+        doc.build(elements)
 
 if __name__ == "__main__":
     app = PDFScannerGUI()
