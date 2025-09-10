@@ -9,7 +9,7 @@ import logging
 import pdfplumber
 from rapidfuzz import fuzz
 import tkinter as tk
-from tkinter import filedialog, ttk
+from tkinter import filedialog, ttk, messagebox
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -276,6 +276,7 @@ class PDFScannerGUI:
         total_files = len(pdf_files)
         
         if total_files == 0:
+            messagebox.showerror("No PDFs Found", "No PDF files found in the selected folder.")
             self.safe_update_gui(status="No PDF files found in selected folder")
             return
 
