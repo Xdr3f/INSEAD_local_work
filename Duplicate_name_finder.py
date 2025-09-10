@@ -100,6 +100,19 @@ def find_exact_word_match(word: str, text: str) -> Tuple[bool, str, List[str]]:
         return True, word, []
     return False, "", []
 
+def get_best_ngram_match(name, chunk, ngram_range=(2, 5)):
+    words = chunk.split()
+    candidates = set()
+    for n in range(ngram_range[0], ngram_range[1]+1):
+        for i in range(len(words) - n + 1):
+            candidates.add(" ".join(words[i:i+n]))
+    # Always include the whole chunk as fallback
+    candidates.add(chunk)
+    from rapidfuzz import process
+    match, score, _ = process.extractOne(name, candidates)
+    return match if match else chunk
+
+
 def check_name_in_pdf(pdf_path: str) -> Dict:
     pdf_text, error = extract_text_from_pdf(pdf_path)
     if error:
@@ -155,8 +168,8 @@ def check_name_in_pdf(pdf_path: str) -> Dict:
                     if not perfect_match_found and score > best_score:
                         best_score = min(score, Config.PERFECT_MATCH_THRESHOLD - 1)
                         best_pair = (name, "")
-                        best_matched_text = name
-                        print(f"  Partial match candidate: {name} -> score {score}")
+                        # Find the actual best-matching substring in the chunk
+                        best_matched_text = get_best_ngram_match(name, chunk)
 
             if perfect_match_found:
                 break
@@ -197,8 +210,9 @@ def check_name_in_pdf(pdf_path: str) -> Dict:
                                 if not perfect_match_found and score > best_score:
                                     best_score = min(score, Config.PERFECT_MATCH_THRESHOLD - 1)
                                     best_pair = (first_with_acc, last_with_acc)
-                                    best_matched_text = name
-                                    print(f"  Partial match candidate: {name} -> score {score}")
+                                    # Use RapidFuzz to find the closest substring in the chunk
+                                    best_matched_text = get_best_ngram_match(name, chunk)
+                                    print(f"  Partial match candidate: {name} -> score {score}, PDF match: '{best_matched_text}'")
 
                         if perfect_match_found:
                             break
@@ -383,7 +397,7 @@ class PDFScannerGUI:
                     elif len(item) == 4:  # normal match info
                         file, pair, score, matched_text = item
                         pair_text = " ".join(p for p in pair if p) if pair else "N/A"
-                        text = f"- {file} — {pair_text} — {score:.0f}% — Best match: '{matched_text}'"
+                        text = f"- {file} — {pair_text} — {score:.0f}% — Best filename: '{pair_text}' — Closest PDF: '{matched_text}'"
                     else:
                         # Catch-all safety
                         text = f"- Unexpected result format: {item}"
