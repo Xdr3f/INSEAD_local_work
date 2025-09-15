@@ -66,7 +66,7 @@ Python 3.10+
 - ``folder_path`` – Path containing PDFs.
 - ``threshold`` – Maximum Hamming distance for near-duplicate detection.
 
-	**Returns:** Tuple (``exact_duplicates``, ``near_duplicates``) where each is a list of tuples (``duplicate_file``, ``original_file``, ``distance``)
+**Returns:** Tuple (``exact_duplicates``, ``near_duplicates``) where each is a list of tuples (``duplicate_file``, ``original_file``, ``distance``)
 
 **Notes:**
 - ``distance = 0`` → exact match
