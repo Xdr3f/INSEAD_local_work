@@ -1,6 +1,6 @@
 import os
 import hashlib
-import fitz  # PyMuPDF
+import fitz  # PyMuPDF for reading PDFs
 from PIL import Image
 import imagehash
 import tempfile
@@ -10,9 +10,12 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
-
 # ===== PDF Hashing =====
 def hash_pdf_file(filepath):
+    """
+    Computes a SHA-256 hash of the PDF file's binary content.
+    Useful for detecting exact binary duplicates.
+    """
     hasher = hashlib.sha256()
     with open(filepath, 'rb') as f:
         while True:
@@ -24,7 +27,11 @@ def hash_pdf_file(filepath):
 
 
 def perceptual_hash_pdf(filepath):
-    """Compute a perceptual hash from the first page of a PDF."""
+    """
+    Generates a perceptual hash based on the first page of the PDF.
+    Converts the page to grayscale, resizes to 256x256, and calculates pHash.
+    Useful for detecting visually similar (near-duplicate) PDFs.
+    """
     try:
         doc = fitz.open(filepath)
         if len(doc) == 0:
@@ -38,9 +45,19 @@ def perceptual_hash_pdf(filepath):
         print(f"Error hashing {filepath}: {e}")
         return None
 
-
 # ===== Find Duplicates =====
 def find_duplicate_pdfs(folder_path, threshold=5):
+    """
+    Scan the folder and find exact and near-duplicate PDFs.
+    
+    Args:
+        folder_path (str): Path to the folder containing PDFs
+        threshold (int): Maximum hamming distance for near-duplicates
+    
+    Returns:
+        exact_duplicates (list): [(duplicate_filename, original_filename, distance)]
+        near_duplicates (list): [(duplicate_filename, original_filename, distance)]
+    """
     pdf_files = [f for f in os.listdir(folder_path) if f.lower().endswith('.pdf')]
     hashes = {}
     exact_duplicates = []
@@ -67,19 +84,24 @@ def find_duplicate_pdfs(folder_path, threshold=5):
             hashes[file_hash] = file
     return exact_duplicates, near_duplicates
 
-
 # ===== PDF Report Generation =====
 def generate_pdf_report(folder_path, exact_duplicates, near_duplicates, save_path, thumbnail=True):
-    import tempfile, shutil
-
-    # Create one temporary folder for all thumbnails
+    """
+    Generates a PDF report summarizing duplicates found in the folder.
+    
+    Args:
+        folder_path (str): Scanned folder path
+        exact_duplicates (list): List of exact duplicates
+        near_duplicates (list): List of near duplicates
+        save_path (str): Output PDF path
+        thumbnail (bool): Whether to include first-page thumbnails
+    """
+    # Temporary folder for thumbnails
     thumb_tempdir = tempfile.mkdtemp(prefix="pdf_thumbs_")
-
     doc = SimpleDocTemplate(save_path, pagesize=A4)
     elements = []
     styles = getSampleStyleSheet()
 
-    # Custom style for totals
     total_style = ParagraphStyle(
         'total_style',
         parent=styles['Heading2'],
@@ -92,52 +114,46 @@ def generate_pdf_report(folder_path, exact_duplicates, near_duplicates, save_pat
     elements.append(Paragraph("Duplicate PDF Files Report", styles['Title']))
     elements.append(Spacer(1, 12))
     elements.append(Paragraph(f"Folder scanned: {folder_path}", styles['Normal']))
-
-    # Totals with friendlier style
     elements.append(Paragraph(f"Total exact duplicates: {len(exact_duplicates)}", total_style))
     elements.append(Paragraph(f"Total near-duplicates (threshold applied): {len(near_duplicates)}", total_style))
     elements.append(Spacer(1, 24))
 
     def add_table_section(title, data_list):
+        """Add a table for a section (exact or near duplicates)"""
         if not data_list:
             elements.append(Paragraph(f"No {title.lower()} found.", styles['Normal']))
             return
-    
+
         elements.append(Paragraph(title, styles['Heading2']))
         elements.append(Spacer(1, 12))
-    
-        # Small paragraph style for table cells
+
         cell_style = ParagraphStyle('cell_style', fontSize=9, leading=11)
-    
         table_data = [["Duplicate", "Original", "Distance", "Thumbnail"]]
+
         for dup, orig, dist in data_list:
-            dup_paragraph = Paragraph(dup, cell_style)
-            orig_paragraph = Paragraph(orig, cell_style)
-            dist_paragraph = Paragraph(str(dist), cell_style)
-    
-            row = [dup_paragraph, orig_paragraph, dist_paragraph]
-    
+            row = [
+                Paragraph(dup, cell_style),
+                Paragraph(orig, cell_style),
+                Paragraph(str(dist), cell_style)
+            ]
+
             if thumbnail:
                 try:
-                    img_path = os.path.join(folder_path, dup)
-                    doc_pdf = fitz.open(img_path)
+                    doc_pdf = fitz.open(os.path.join(folder_path, dup))
                     page = doc_pdf[0]
                     pix = page.get_pixmap(dpi=50)
                     img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
-
-                    # Save into the global tempdir
                     thumb_path = os.path.join(thumb_tempdir, f"thumb_{dup}.png")
                     img.thumbnail((80, 100))
                     img.save(thumb_path)
-
                     row.append(RLImage(thumb_path))
                 except Exception:
                     row.append(Paragraph("Error", cell_style))
             else:
                 row.append("")
-    
+
             table_data.append(row)
-    
+
         table = Table(table_data, colWidths=[150, 150, 60, 100])
         table.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.grey),
@@ -150,16 +166,12 @@ def generate_pdf_report(folder_path, exact_duplicates, near_duplicates, save_pat
         ]))
         elements.append(table)
         elements.append(PageBreak())
-    
+
     add_table_section("Exact Duplicates", exact_duplicates)
     add_table_section("Near-Duplicates", near_duplicates)
 
     doc.build(elements)
-
-    # Cleanup temp thumbnails AFTER PDF is fully built
     shutil.rmtree(thumb_tempdir, ignore_errors=True)
-
-
 
 # ===== Main Execution =====
 if __name__ == "__main__":
