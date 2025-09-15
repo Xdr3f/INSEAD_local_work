@@ -20,6 +20,27 @@ def page_verification(text):
     required_phrases = ["dear", "chief people officer"]
     return any(phrase in text.lower() for phrase in required_phrases)
 
+def find_number_below_name(text, first_name, last_name, max_lines_below=2):
+                """
+                Look for a sequence of digits directly below the line containing the person's name.
+                """
+                lines = [line.strip() for line in text.splitlines() if line.strip()]
+                if not first_name or not last_name:
+                    return None
+
+                name_pattern = re.compile(rf"{re.escape(first_name)}.*{re.escape(last_name)}", re.IGNORECASE)
+
+                for idx, line in enumerate(lines):
+                    if name_pattern.search(line):
+                        # Check next few lines
+                        for offset in range(1, max_lines_below + 1):
+                            if idx + offset < len(lines):
+                                candidate = lines[idx + offset]
+                                number_match = re.match(r"^\d{1,}$", candidate)  # 4+ digits only
+                                if number_match:
+                                    return number_match.group(0)
+                return None
+
 def extract_name(text, max_lines_above=8):
     first_name = None
     last_name = None
@@ -116,7 +137,7 @@ class PDFSplitterGUI:
             total_files = len(input_pdfs)
             all_saved_files = []
             current_prefix = datetime.now().strftime("%Y-%m")
-
+            
             for idx, input_pdf in enumerate(input_pdfs, 1):
                 reader = PdfReader(input_pdf)
                 saved_files = []
@@ -129,28 +150,38 @@ class PDFSplitterGUI:
                     verified = page_verification(text)
 
                     if pn_match or verified:
+                        # Save previous doc if any
                         if writer and current_filename:
                             with open(current_filename, "wb") as f_out:
                                 writer.write(f_out)
                             saved_files.append(current_filename)
 
+                        # Extract name
                         first_name, last_name = extract_name(text)
                         if not first_name:
                             first_name = "UNKNOWN"
                         if not last_name:
                             last_name = "UNKNOWN"
 
+                        # Get Person Number (explicit or fallback)
                         if pn_match:
                             person_number = sanitize_filename(pn_match.group(1))
                         else:
-                            person_number = f"PN_NotFound_page_{i+1:04d}"
+                            candidate_pn = find_number_below_name(text, first_name, last_name)
+                            if candidate_pn:
+                                person_number = sanitize_filename(candidate_pn)
+                            else:
+                                person_number = f"PN_NotFound_page_{i+1:04d}"
 
+                        # Build filename
                         base_name = f"{current_prefix}_Salary Review_{last_name.upper()}_{first_name}_{person_number}.pdf"
                         current_filename = os.path.join(output_subfolder, sanitize_filename(base_name))
+
                         writer = PdfWriter()
                         writer.add_page(page)
 
                     else:
+                        # Continuation page
                         if writer:
                             writer.add_page(page)
                         else:
@@ -159,6 +190,7 @@ class PDFSplitterGUI:
                             writer = PdfWriter()
                             writer.add_page(page)
 
+                # Save last file
                 if writer and current_filename:
                     with open(current_filename, "wb") as f_out:
                         writer.write(f_out)
@@ -168,7 +200,7 @@ class PDFSplitterGUI:
                 self.safe_update_gui(
                     status=f"Processing {idx}/{total_files}",
                     detail=f"Current file: {os.path.basename(input_pdf)}",
-                    progress=(idx/total_files)*100
+                    progress=(idx / total_files) * 100
                 )
 
             self.safe_update_gui(
@@ -176,11 +208,13 @@ class PDFSplitterGUI:
                 detail=f"Output folder: {output_subfolder}",
                 progress=100
             )
-
+            self.root.after(2000, self.root.destroy)  # closes window after 2 seconds
+            
         except Exception as e:
             tb_str = "".join(traceback.format_exception(type(e), e, e.__traceback__))
             self.safe_update_gui(status="An unexpected error occurred. See console.")
             print("An unexpected error occurred:\n", tb_str)
+
 
 if __name__ == "__main__":
     app = PDFSplitterGUI()
