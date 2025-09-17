@@ -214,7 +214,7 @@ class PDFSplitterGUI:
 
                 for i, page in enumerate(reader.pages):
                     text = page.extract_text() or ""
-                    pn_match = re.search(r"Person Number[:\s]+(\d+)", text)
+                    pn_match = re.search(r"PN[:\s]+(\d+)", text)
                     verified = page_verification(text)
 
                     if pn_match or verified:

@@ -5,7 +5,7 @@
 This script splits large PDF files (like salary review letters) into individual PDFs per employee, based on detecting:
 
 - The employee’s name (using "Dear ...")
-- Their person number (from explicit "Person Number:" field or directly below the name)
+- Their person number (from explicit "PN:" field or directly below the name)
 
 It uses PyPDF2 for PDF processing and Tkinter for a simple GUI with progress reporting.
 
@@ -19,7 +19,7 @@ It uses PyPDF2 for PDF processing and Tkinter for a simple GUI with progress rep
 	YYYY-MM_Salary Review_LASTNAME_Firstname_PersonNumber.pdf
 ```
 
-- Handles continuation pages (multiple pages per employee
+- Handles continuation pages (multiple pages per employee)
 - GUI shows progress and automatically closes when finished
 
 ## Requirements
@@ -97,6 +97,15 @@ Input PDF contains:
 Dear John,
 John Doe
 104
+Human Resources
+```
+
+or
+
+```nginx
+Dear John,
+John Doe
+PN:104
 Human Resources
 ```
 
