@@ -25,28 +25,30 @@ def sanitize_filename(name):
 def page_verification(text):
     """
     Lightweight heuristic to confirm if a page starts a new employee letter.
-    Looks for key phrases like "Dear" or "Chief People Officer".
+    Looks for key phrases like "Dear", "Cher" or "Chère".
     """
-    required_phrases = ["dear", "chief people officer"]
+    required_phrases = ["dear", "cher", "chère"]
     return any(phrase in text.lower() for phrase in required_phrases)
 
 
-def find_number_below_name(text, first_name, last_name, max_lines_below=2):
+def find_number_below_name(text, first_names, last_name, max_lines_below=3):
     """
     Try to find a numeric identifier (person number) in lines immediately below the name.
     Example:
-        Dear John,
-        John Doe
-        104
-        Human Resources
+        Full Name
+        PN : 104
+        Dear John
     Returns: the number as string, or None if not found.
     """
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-    if not first_name or not last_name:
+    if not first_names or not last_name:
         return None
 
-    # Regex: look for "Firstname ... Lastname" on the same line
-    name_pattern = re.compile(rf"{re.escape(first_name)}.*{re.escape(last_name)}", re.IGNORECASE)
+    # Build a regex that matches the entire full name (first names + last name)
+    name_pattern = re.compile(
+        r"\b" + r"\s+".join(map(re.escape, first_names)) + r"\s+" + re.escape(last_name) + r"\b",
+        re.IGNORECASE
+    )
 
     for idx, line in enumerate(lines):
         if name_pattern.search(line):
@@ -55,56 +57,57 @@ def find_number_below_name(text, first_name, last_name, max_lines_below=2):
                 if idx + offset < len(lines):
                     candidate = lines[idx + offset]
                     # Match whole line if it’s only digits
-                    number_match = re.match(r"^\d{1,}$", candidate)
-                    if number_match:
-                        return number_match.group(0)
+                    if re.fullmatch(r"\d+", candidate):
+                        return candidate
     return None
 
 
-def extract_name(text, max_lines_above=8):
+def extract_name(text):
     """
-    Extract first name and last name from page text.
-    Logic:
-    - Find the line starting with "Dear ..."
-    - Capture the first name from that greeting
-    - Look up a few lines above 'Dear' to find a last name that matches
-
-    Returns: (first_name, last_name) or (None, None) if not found
+    Extract first name(s) and last name from page text.
+    
+    Process:
+    1. Identify the greeting line starting with "Dear", "Cher", or "Chère".
+    2. Extract all first names from the greeting, stripping punctuation.
+    3. Search all lines above the greeting to find a line containing all first names.
+       - Everything after the last first name in that line is assumed to be the last name.
+    4. If no line contains the full name, the last name defaults to 'UNKNOWN'.
+    
+    Returns:
+        first_names_str (str): All extracted first names joined by space.
+        last_name (str): Extracted last name, or 'UNKNOWN' if not found.
     """
-    first_name = None
-    last_name = None
+    first_names = []
+    last_name = "UNKNOWN"
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     dear_idx = None
 
-    # Find "Dear <firstname>"
+    # Find greeting line
     for idx, line in enumerate(lines):
-        dear_match = re.search(
-            r"Dear[,]?\s+([A-Za-zÀ-ÖØ-öø-ÿ\-']+(?:\s+[A-Za-zÀ-ÖØ-öø-ÿ\-']+)?)",
-            line, re.IGNORECASE
-        )
-        if dear_match:
-            first_name = dear_match.group(1).strip()
+        match = re.match(r"^(Dear|Cher|Chère)[,]?\s+(.*)", line, flags=re.I)
+        if match:
             dear_idx = idx
+            # Extract all first names from greeting, stripping punctuation
+            first_names = [fn.strip(string.punctuation) for fn in re.split(r"\s+", match.group(2).strip())]
             break
 
-    if not first_name:
+    if dear_idx is None or not first_names:
         return None, None
 
-    # Search upwards (within N lines above "Dear") for last name
-    start_idx = max(0, dear_idx - max_lines_above)
-    candidate_lines = lines[start_idx:dear_idx][::-1]  # reverse order
-    candidate_lines.append(lines[dear_idx])  # also check the "Dear ..." line
-
-    for line in candidate_lines:
-        pattern = re.compile(
-            rf"{re.escape(first_name)}\s+([A-Za-zÀ-ÖØ-öø-ÿ\-']+(?:\s+[A-Za-zÀ-ÖØ-öø-ÿ\-']+){{0,2}})"
-        )
-        match = pattern.search(line)
-        if match:
-            last_name = match.group(1).strip()
+    # Search all previous lines for full name containing all first names
+    for line in reversed(lines[:dear_idx]):
+        found_all = all(re.search(rf"\b{re.escape(fn)}\b", line) for fn in first_names)
+        if found_all:
+            temp = line
+            for fn in first_names:
+                temp = re.sub(rf"\b{re.escape(fn)}\b", "", temp, count=1).strip()
+            if temp:
+                last_name = temp
             break
 
-    return first_name, last_name
+    return " ".join(first_names), last_name
+
+
 
 
 # -------------------------
@@ -175,15 +178,6 @@ class PDFSplitterGUI:
         thread.start()
 
     def process_pdfs(self):
-        """
-        Core logic:
-        - Ask user for PDFs and output folder
-        - Process each PDF page by page
-        - Detect when a new employee starts
-        - Extract names + person number
-        - Save individual employee PDFs into a timestamped folder
-        - Update GUI with progress
-        """
         try:
             # Ask for PDFs
             input_pdfs = askopenfilenames(title="Select PDF files", filetypes=[("PDF Files", "*.pdf")])
@@ -198,7 +192,8 @@ class PDFSplitterGUI:
                 return
 
             # Create timestamped subfolder
-            output_subfolder_name = f"Splitted_PDFs_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
+            timestamp_str = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+            output_subfolder_name = f"Splitted_PDFs_{timestamp_str}"
             output_subfolder = os.path.join(save_folder, output_subfolder_name)
             os.makedirs(output_subfolder, exist_ok=True)
 
@@ -206,65 +201,110 @@ class PDFSplitterGUI:
             all_saved_files = []
             current_prefix = datetime.now().strftime("%Y-%m")
 
+            # Collect information for summary GUI
+            missing_cpo_list = []
+            unknown_name_list = []
+
             for idx, input_pdf in enumerate(input_pdfs, 1):
                 reader = PdfReader(input_pdf)
                 saved_files = []
                 writer = None
                 current_filename = None
+                cpo_found = False
+                person_number_current = "UNKNOWN"
+                first_name_current = "UNKNOWN"
+                last_name_current = "UNKNOWN"
 
                 for i, page in enumerate(reader.pages):
                     text = page.extract_text() or ""
+                    has_dear = bool(re.search(r"^(Dear|Cher|Chère)[,]?\s+", text, flags=re.I))
                     pn_match = re.search(r"PN[:\s]+(\d+)", text)
-                    verified = page_verification(text)
+                    has_cpo = "chief people officer" in text.lower()
 
-                    if pn_match or verified:
-                        # Save previous employee PDF if open
+                    # Decide if we need a new PDF
+                    if pn_match or has_dear:
+                        # Save previous PDF
                         if writer and current_filename:
                             with open(current_filename, "wb") as f_out:
                                 writer.write(f_out)
                             saved_files.append(current_filename)
 
+                            # Track missing CPO
+                            if not cpo_found:
+                                missing_cpo_list.append({
+                                    "Filename": os.path.basename(current_filename),
+                                    "First Name": first_name_current,
+                                    "Last Name": last_name_current
+                                })
+
+                            # Track UNKNOWN names
+                            if "UNKNOWN" in first_name_current or "UNKNOWN" in last_name_current:
+                                unknown_name_list.append({
+                                    "Filename": os.path.basename(current_filename),
+                                    "First Name": first_name_current,
+                                    "Last Name": last_name_current
+                                })
+
                         # Extract name
-                        first_name, last_name = extract_name(text)
-                        if not first_name:
-                            first_name = "UNKNOWN"
-                        if not last_name:
-                            last_name = "UNKNOWN"
+                        first_name_str, last_name = extract_name(text)
+                        first_name_current = first_name_str if first_name_str else "UNKNOWN"
+                        last_name_current = last_name if last_name else "UNKNOWN"
 
                         # Get Person Number
                         if pn_match:
-                            person_number = sanitize_filename(pn_match.group(1))
+                            person_number_current = sanitize_filename(pn_match.group(1))
                         else:
-                            candidate_pn = find_number_below_name(text, first_name, last_name)
+                            candidate_pn = find_number_below_name(text, first_name_current.split(), last_name_current)
                             if candidate_pn:
-                                person_number = sanitize_filename(candidate_pn)
+                                person_number_current = sanitize_filename(candidate_pn)
                             else:
-                                person_number = f"PN_NotFound_page_{i+1:04d}"
+                                person_number_current = f"PN_NotFound_page_{i+1:04d}"
 
                         # Build filename
-                        base_name = f"{current_prefix}_Salary Review_{last_name.upper()}_{first_name}_{person_number}.pdf"
+                        base_name = f"{current_prefix}_Salary Review_{last_name_current.upper()}_{first_name_current}_{person_number_current}.pdf"
                         current_filename = os.path.join(output_subfolder, sanitize_filename(base_name))
 
-                        # Start a new PDF
+                        # Start new PDF
                         writer = PdfWriter()
                         writer.add_page(page)
+                        cpo_found = has_cpo
 
                     else:
-                        # Continuation page of current employee
+                        # Continuation page
                         if writer:
                             writer.add_page(page)
+                            if has_cpo:
+                                cpo_found = True
                         else:
-                            # Fallback in case no employee detected yet
+                            # Fallback if first page doesn't have PN/Dear
                             fallback_name = f"{current_prefix}_Salary Review_UNKNOWN_UNKNOWN_PN_NotFound_page_{i+1:04d}.pdf"
                             current_filename = os.path.join(output_subfolder, sanitize_filename(fallback_name))
                             writer = PdfWriter()
                             writer.add_page(page)
+                            if has_cpo:
+                                cpo_found = True
 
-                # Save the last file for this input PDF
+                # Save last PDF
                 if writer and current_filename:
                     with open(current_filename, "wb") as f_out:
                         writer.write(f_out)
                     saved_files.append(current_filename)
+
+                    # Track missing CPO
+                    if not cpo_found:
+                        missing_cpo_list.append({
+                            "Filename": os.path.basename(current_filename),
+                            "First Name": first_name_current,
+                            "Last Name": last_name_current
+                        })
+
+                    # Track UNKNOWN names
+                    if "UNKNOWN" in first_name_current or "UNKNOWN" in last_name_current:
+                        unknown_name_list.append({
+                            "Filename": os.path.basename(current_filename),
+                            "First Name": first_name_current,
+                            "Last Name": last_name_current
+                        })
 
                 all_saved_files.extend(saved_files)
 
@@ -275,6 +315,28 @@ class PDFSplitterGUI:
                     progress=(idx / total_files) * 100
                 )
 
+            # Display summary GUI
+            summary_window = tk.Toplevel(self.root)
+            summary_window.title("PDF Summary Report")
+
+            summary_text = tk.Text(summary_window, width=100, height=30)
+            summary_text.pack(padx=10, pady=10)
+
+            summary_text.insert(tk.END, f"Total PDFs processed: {len(all_saved_files)}\n\n")
+            summary_text.insert(tk.END, f"PDFs missing CPO: {len(missing_cpo_list)}\n")
+            for item in missing_cpo_list:
+                summary_text.insert(tk.END, f"  - {item['Filename']} ({item['First Name']} {item['Last Name']})\n")
+
+            summary_text.insert(tk.END, f"\nPDFs with UNKNOWN names: {len(unknown_name_list)}\n")
+            for item in unknown_name_list:
+                summary_text.insert(tk.END, f"  - {item['Filename']} ({item['First Name']} {item['Last Name']})\n")
+
+            summary_text.config(state=tk.DISABLED)
+
+            # Close button
+            close_button = ttk.Button(summary_window, text="Close", command=summary_window.destroy)
+            close_button.pack(pady=5)
+
             # Final status
             self.safe_update_gui(
                 status=f"Done! {len(all_saved_files)} PDFs saved.",
@@ -282,11 +344,7 @@ class PDFSplitterGUI:
                 progress=100
             )
 
-            # Auto-close after 2 seconds
-            self.root.after(2000, self.root.destroy)
-
         except Exception as e:
-            # Print traceback for debugging
             tb_str = "".join(traceback.format_exception(type(e), e, e.__traceback__))
             self.safe_update_gui(status="An unexpected error occurred. See console.")
             print("An unexpected error occurred:\n", tb_str)
