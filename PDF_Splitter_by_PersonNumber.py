@@ -13,13 +13,13 @@ from tkinter.filedialog import askopenfilenames, askdirectory
 # Utilities
 # -------------------------
 
-def sanitize_filename(name):
+def sanitize_filename(name):    
     """
     Remove/replace invalid characters so filenames are safe across OS.
-    Keeps letters, digits, spaces, dashes, underscores, dots, and parentheses.
+    Keeps Unicode letters (accents), digits, spaces, dashes, underscores, dots, and parentheses.
     """
-    valid_chars = f"-_.() {string.ascii_letters}{string.digits}"
-    return "".join(c for c in name if c in valid_chars)
+    allowed_extra = "-_.() "
+    return "".join(c for c in name if c.isalpha() or c.isdigit() or c in allowed_extra)
 
 
 def page_verification(text):
@@ -62,40 +62,62 @@ def find_number_below_name(text, first_names, last_name, max_lines_below=3):
     return None
 
 
-def extract_name(text):
+def extract_name(text, debug=False):
     """
-    Extract first name(s) and last name from page text.
-    
-    Process:
-    1. Identify the greeting line starting with "Dear", "Cher", or "Chère".
-    2. Extract all first names from the greeting, stripping punctuation.
-    3. Search all lines above the greeting to find a line containing all first names.
-       - Everything after the last first name in that line is assumed to be the last name.
-    4. If no line contains the full name, the last name defaults to 'UNKNOWN'.
-    
+    Extract first name(s) and last name from page text, handling cases
+    where leftover numbers from previous page appear.
+
+    Steps:
+    1. Replace \xa0 with a line break to separate previous page remnants.
+    2. Strip and clean lines, removing leading digits that are likely leftover.
+    3. Find greeting line (Dear/Cher/Chère) and extract first names.
+    4. Search lines above greeting to find full name and deduce last name.
+
     Returns:
-        first_names_str (str): All extracted first names joined by space.
-        last_name (str): Extracted last name, or 'UNKNOWN' if not found.
+        first_names_str (str): Extracted first names joined by space
+        last_name (str): Extracted last name or 'UNKNOWN'
     """
     first_names = []
     last_name = "UNKNOWN"
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    dear_idx = None
 
-    # Find greeting line
+    # Step 1: split by \xa0 to separate end-of-page artifacts
+    text = text.replace('\xa0', '\n')
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+
+    if debug:
+        print("[DEBUG:extract_name] Lines after \\xa0 split:")
+        for idx, line in enumerate(lines, 1):
+            print(f"  Line {idx}: '{line}'")
+
+    # Step 2: remove leading digits from each line (artifacts from previous page)
+    cleaned_lines = []
+    for idx, line in enumerate(lines, 1):
+        new_line = re.sub(r'^\d+', '', line).strip()
+        cleaned_lines.append(new_line)
+        if debug and new_line != line:
+            print(f"[DEBUG:extract_name] Cleaned line {idx}: '{line}' -> '{new_line}'")
+
+    lines = cleaned_lines
+
+    # Step 3: find greeting line
+    dear_idx = None
     for idx, line in enumerate(lines):
         match = re.match(r"^(Dear|Cher|Chère)[,]?\s+(.*)", line, flags=re.I)
         if match:
             dear_idx = idx
-            # Extract all first names from greeting, stripping punctuation
             first_names = [fn.strip(string.punctuation) for fn in re.split(r"\s+", match.group(2).strip())]
+            if debug:
+                print(f"[DEBUG:extract_name] Greeting found at line {idx+1}: '{line}'")
+                print(f"[DEBUG:extract_name] Extracted first names: {first_names}")
             break
 
     if dear_idx is None or not first_names:
+        if debug:
+            print("[DEBUG:extract_name] No greeting or first names found.")
         return None, None
 
-    # Search all previous lines for full name containing all first names
-    for line in reversed(lines[:dear_idx]):
+    # Step 4: search all lines above greeting for full name
+    for line_idx, line in enumerate(reversed(lines[:dear_idx]), 1):
         found_all = all(re.search(rf"\b{re.escape(fn)}\b", line) for fn in first_names)
         if found_all:
             temp = line
@@ -103,7 +125,12 @@ def extract_name(text):
                 temp = re.sub(rf"\b{re.escape(fn)}\b", "", temp, count=1).strip()
             if temp:
                 last_name = temp
+            if debug:
+                print(f"[DEBUG:extract_name] Full name line found (reversed index {line_idx}): '{line}'")
+                print(f"[DEBUG:extract_name] Deduced last name: '{last_name}'")
             break
+        elif debug:
+            print(f"[DEBUG:extract_name] Line {line_idx} did not contain all first names: '{line}'")
 
     return " ".join(first_names), last_name
 
@@ -217,7 +244,7 @@ class PDFSplitterGUI:
 
                 for i, page in enumerate(reader.pages):
                     text = page.extract_text() or ""
-                    has_dear = bool(re.search(r"^(Dear|Cher|Chère)[,]?\s+", text, flags=re.I))
+                    has_dear = bool(re.search(r"^(Dear|Cher|Chère)[,]?\s+", text, flags=re.I | re.M))
                     pn_match = re.search(r"PN[:\s]+(\d+)", text)
                     has_cpo = "chief people officer" in text.lower()
 
