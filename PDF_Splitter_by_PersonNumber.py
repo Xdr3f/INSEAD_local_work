@@ -8,18 +8,23 @@ import threading
 import tkinter as tk
 from tkinter import ttk
 from tkinter.filedialog import askopenfilenames, askdirectory
+import unicodedata
 
 # -------------------------
 # Utilities
 # -------------------------
 
-def sanitize_filename(name):    
+def sanitize_filename(name):
     """
     Remove/replace invalid characters so filenames are safe across OS.
-    Keeps Unicode letters (accents), digits, spaces, dashes, underscores, dots, and parentheses.
+    Convert accented letters to their ASCII equivalents (è -> e), then keep
+    letters, digits and allowed punctuation.
     """
     allowed_extra = "-_.() "
-    return "".join(c for c in name if c.isalpha() or c.isdigit() or c in allowed_extra)
+    # Normalize to NFKD to decompose accents, then drop non-ASCII (the combining marks)
+    normalized = unicodedata.normalize("NFKD", name)
+    ascii_only = normalized.encode("ascii", "ignore").decode("ascii")
+    return "".join(c for c in ascii_only if c.isalpha() or c.isdigit() or c in allowed_extra)
 
 
 def page_verification(text):
