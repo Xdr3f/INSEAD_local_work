@@ -36,6 +36,9 @@ import datetime
 import threading
 import sys
 import traceback
+import pytesseract
+from PIL import Image
+import io
 
 # ------------------------------
 # Logging Setup
@@ -58,28 +61,54 @@ class Config:
 # ------------------------------
 # PDF Text Extraction
 # ------------------------------
-def extract_text_from_pdf(pdf_path: str) -> Tuple[str, Optional[str]]:
+def extract_text_from_pdf(pdf_path: str) -> Tuple[str, Optional[str], str]:
     """
-    Extracts text from a PDF file.
+    Extracts text from a PDF file and determines its type:
+    - Text-only
+    - Image-only
+    - Mixed
 
     Args:
         pdf_path (str): Path to PDF file
 
     Returns:
-        Tuple[str, Optional[str]]: Extracted text and any error message
+        Tuple[str, Optional[str], str]: (Extracted text, Error message, PDF type)
     """
     text_content = []
     error_message = None
+    has_text = False
+    has_images = False
+    used_ocr = False
 
     try:
         with pdfplumber.open(pdf_path) as pdf:
             for page_num, page in enumerate(pdf.pages, 1):
+                page_text = None
                 try:
+                    # Try normal text extraction
                     page_text = page.extract_text()
+
                     if page_text and not page_text.isspace():
+                        has_text = True
                         text_content.append(page_text)
+
+                    # Detect images
+                    if page.images and len(page.images) > 0:
+                        has_images = True
+
+                    # OCR fallback if no text found
+                    if (not page_text or page_text.isspace()) and page.images:
+                        used_ocr = True
+                        # Convert PDF page to image
+                        page_image = page.to_image(resolution=300)
+                        img_bytes = page_image.original.convert("RGB")
+                        # Run OCR
+                        ocr_text = pytesseract.image_to_string(img_bytes, lang="eng+fra")
+                        if ocr_text and not ocr_text.isspace():
+                            has_text = True
+                            text_content.append(ocr_text)
+
                 except Exception as e:
-                    # Log page-specific extraction error but continue
                     error_message = f"Error on page {page_num}: {str(e)}"
                     logging.warning(error_message)
 
@@ -87,35 +116,24 @@ def extract_text_from_pdf(pdf_path: str) -> Tuple[str, Optional[str]]:
         error_message = f"Error opening PDF: {str(e)}"
         logging.error(error_message)
 
-    return " ".join(text_content), error_message
-
-# ------------------------------
-# Text Normalization
-# ------------------------------
-def normalize_text(text: str, preserve_accents: bool = False) -> str:
-    """
-    Normalize text for comparison:
-    - Lowercase
-    - Remove punctuation
-    - Optional: preserve accents
-    - Normalize whitespace
-
-    Args:
-        text (str): Input text
-        preserve_accents (bool): Whether to preserve accents
-
-    Returns:
-        str: Normalized text
-    """
-    text = (text or "").lower()
-    if preserve_accents:
-        text = unicodedata.normalize("NFKC", text)
+    # Determine PDF type
+    if has_text and has_images:
+        pdf_type = "Mixed (text + image)"
+    elif has_text:
+        pdf_type = "Text-only"
+    elif has_images:
+        pdf_type = "Image-only"
     else:
-        text = unicodedata.normalize("NFKD", text).encode('ascii', 'ignore').decode('ascii')
-    # Keep only letters, digits, spaces, and hyphens
-    text = re.sub(r'[^a-z0-9\s-]', ' ', text)
-    text = re.sub(r'\s+', ' ', text).strip()
-    return text
+        pdf_type = "Empty/Unreadable"
+
+    # Add OCR info
+    if used_ocr:
+        pdf_type += " + OCR"
+
+    # Print detection info
+    print(f"[PDF Type] {os.path.basename(pdf_path)} → {pdf_type}")
+
+    return " ".join(text_content), error_message, pdf_type
 
 # ------------------------------
 # Filename Tokenization
@@ -199,9 +217,7 @@ def check_name_in_pdf(pdf_path: str) -> Dict:
     - matched_text: substring from PDF that best matches
     - error: any error encountered
     """
-    pdf_text, error = extract_text_from_pdf(pdf_path)
-    if error:
-        return {"best_pair": None, "best_score": 0, "error": error}
+    pdf_text, error, pdf_type = extract_text_from_pdf(pdf_path)
 
     # Normalize text for matching
     pdf_no_accents = normalize_text(pdf_text, preserve_accents=False)
@@ -290,7 +306,8 @@ def check_name_in_pdf(pdf_path: str) -> Dict:
         "best_pair": best_pair,
         "best_score": best_score,
         "matched_text": best_matched_text,
-        "error": None
+        "error": None,
+        "pdf_type": pdf_type
     }
 
 # ------------------------------
@@ -463,17 +480,19 @@ class PDFScannerGUI:
             else:
                 data.append([
                     Paragraph("Filename", style_normal),
+                    Paragraph("PDF Type", style_normal),
                     Paragraph("Name Detected", style_normal),
                     Paragraph("Score (%)", style_normal),
                     Paragraph("Best Filename", style_normal),
                     Paragraph("Closest Text", style_normal)
                 ])
                 for item in items:
-                    file, pair, score, matched_text = item
+                    file, pdf_type, pair, score, matched_text = item
                     pair_text = " ".join(p for p in pair if p) if pair else "N/A"
                     matched_text_display = matched_text if len(matched_text) <= 500 else matched_text[:497] + "..."
                     data.append([
                         Paragraph(file, style_normal),
+                        Paragraph(pdf_type, style_normal),
                         Paragraph(pair_text, style_normal),
                         Paragraph(f"{score:.0f}", style_normal),
                         Paragraph(pair_text, style_normal),
