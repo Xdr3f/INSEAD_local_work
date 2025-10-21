@@ -523,7 +523,7 @@ class PDFScannerGUI:
                         Paragraph(matched_text_display, style_normal)
                     ])
 
-            col_widths = [120, 120, 60, 120, 120]
+            col_widths = [120, 100, 100, 60, 100, 120]
             t = Table(data, colWidths=col_widths)
             t.setStyle(TableStyle([
                 ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
