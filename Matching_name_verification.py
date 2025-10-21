@@ -136,6 +136,29 @@ def extract_text_from_pdf(pdf_path: str) -> Tuple[str, Optional[str], str]:
     return " ".join(text_content), error_message, pdf_type
 
 # ------------------------------
+# Text Normalization
+# ------------------------------
+def normalize_text(text: str, preserve_accents: bool = False) -> str:
+    """
+    Normalize text for comparison:
+    - Optionally remove accents
+    - Convert to lowercase
+    - Collapse multiple spaces
+    """
+    if not text:
+        return ""
+    text = str(text)
+    if not preserve_accents:
+        # Remove accents
+        text = ''.join(
+            c for c in unicodedata.normalize('NFKD', text)
+            if not unicodedata.combining(c)
+        )
+    # Normalize spaces and lowercase
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip().lower()
+
+# ------------------------------
 # Filename Tokenization
 # ------------------------------
 def extract_name_tokens(filename: str) -> List[str]:
