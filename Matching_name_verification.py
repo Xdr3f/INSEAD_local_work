@@ -412,6 +412,7 @@ class PDFScannerGUI:
                 file = futures[future]
                 try:
                     res = future.result()
+                    pdf_type = res["pdf_type"]
                     score = res["best_score"]
                     pair = res["best_pair"]
                     error = res.get("error")
@@ -420,11 +421,11 @@ class PDFScannerGUI:
                     if error:
                         results["errors"].append((file, error))
                     elif score < Config.NO_MATCH_THRESHOLD:
-                        results["no_match"].append((file, pair, score, matched_text))
+                        results["no_match"].append((file, pdf_type, pair, score, matched_text))
                     elif score < Config.PERFECT_MATCH_THRESHOLD:
-                        results["partial_match"].append((file, pair, score, matched_text))
+                        results["partial_match"].append((file, pdf_type, pair, score, matched_text))
                     else:
-                        results["perfect_match"].append((file, pair, score, matched_text))
+                        results["perfect_match"].append((file, pdf_type, pair, score, matched_text))
                 except Exception as e:
                     results["errors"].append((file, f"Processing error: {str(e)}"))
 
