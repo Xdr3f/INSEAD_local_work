@@ -136,6 +136,29 @@ def extract_text_from_pdf(pdf_path: str) -> Tuple[str, Optional[str], str]:
     return " ".join(text_content), error_message, pdf_type
 
 # ------------------------------
+# Text Normalization
+# ------------------------------
+def normalize_text(text: str, preserve_accents: bool = False) -> str:
+    """
+    Normalize text for comparison:
+    - Optionally remove accents
+    - Convert to lowercase
+    - Collapse multiple spaces
+    """
+    if not text:
+        return ""
+    text = str(text)
+    if not preserve_accents:
+        # Remove accents
+        text = ''.join(
+            c for c in unicodedata.normalize('NFKD', text)
+            if not unicodedata.combining(c)
+        )
+    # Normalize spaces and lowercase
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip().lower()
+
+# ------------------------------
 # Filename Tokenization
 # ------------------------------
 def extract_name_tokens(filename: str) -> List[str]:
@@ -389,6 +412,7 @@ class PDFScannerGUI:
                 file = futures[future]
                 try:
                     res = future.result()
+                    pdf_type = res["pdf_type"]
                     score = res["best_score"]
                     pair = res["best_pair"]
                     error = res.get("error")
@@ -397,11 +421,11 @@ class PDFScannerGUI:
                     if error:
                         results["errors"].append((file, error))
                     elif score < Config.NO_MATCH_THRESHOLD:
-                        results["no_match"].append((file, pair, score, matched_text))
+                        results["no_match"].append((file, pdf_type, pair, score, matched_text))
                     elif score < Config.PERFECT_MATCH_THRESHOLD:
-                        results["partial_match"].append((file, pair, score, matched_text))
+                        results["partial_match"].append((file, pdf_type, pair, score, matched_text))
                     else:
-                        results["perfect_match"].append((file, pair, score, matched_text))
+                        results["perfect_match"].append((file, pdf_type, pair, score, matched_text))
                 except Exception as e:
                     results["errors"].append((file, f"Processing error: {str(e)}"))
 
@@ -499,7 +523,7 @@ class PDFScannerGUI:
                         Paragraph(matched_text_display, style_normal)
                     ])
 
-            col_widths = [120, 120, 60, 120, 120]
+            col_widths = [120, 100, 100, 60, 100, 120]
             t = Table(data, colWidths=col_widths)
             t.setStyle(TableStyle([
                 ('GRID', (0,0), (-1,-1), 0.5, colors.grey),

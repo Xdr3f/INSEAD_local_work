@@ -3,3 +3,5 @@ imagehash>=4.3.1
 reportlab>=4.0.0
 pdfplumber>=0.9.0
 rapidfuzz>=2.16.0
+PyMuPDF>=1.26.5
+pytesseract>=0.3.13
